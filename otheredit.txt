@@ -1,0 +1,177 @@
+<?php // line added to turn on color syntax highlight
+session_start();
+require_once "pdo.php";
+
+if ( ! isset($_SESSION['name']) ) {
+  die('ACCESS DENIED');
+}
+if ( isset($_POST['cancel'] ) ) {
+    header("Location: index.php");
+    return;
+}
+
+function validatePos() {
+  for($i=1; $i<=9; $i++) {
+    if ( ! isset($_POST['year'.$i]) ) continue;
+    if ( ! isset($_POST['desc'.$i]) ) continue;
+
+    $year = $_POST['year'.$i];
+    $desc = $_POST['desc'.$i];
+
+    if ( strlen($year) == 0 || strlen($desc) == 0 ) {
+      return "All fields are required";
+    }
+
+    if ( ! is_numeric($year) ) {
+      return "Position year must be numeric";
+    }
+  }
+  return true;
+}
+
+if ( isset($_POST['first_name']) || isset($_POST['last_name']) ||
+      isset($_POST['email']) || isset($_POST['headline']) || isset($_POST['summary']) ){
+    if ( strlen($_POST['first_name']) < 1 || strlen($_POST['last_name']) < 1 ||
+         strlen($_POST['email']) < 1 || strlen($_POST['headline']) < 1 || strlen($_POST['summary']) < 1){
+        $_SESSION["error"] = "All fields are required";
+        header("Location: edit.php?profile_id=".$_POST['profile_id']);
+        return;
+    } elseif (strpos($_POST['email'], "@") === false){
+        $_SESSION["error"] = "Email address must contain @";
+        header("Location: edit.php?profile_id=".$_POST['profile_id']);
+        return;
+    }
+    $validation = validatepos();
+    if ( $validation !== true) {
+      $_SESSION["error"] = $validation;
+      return;
+    } else {
+      $stmt = $pdo->prepare('UPDATE Profile
+              SET user_id = :uid, first_name = :fn, last_name = :ln,
+              email = :em, headline = :he, summary = :su
+              WHERE profile_id = :pid');
+      $stmt->execute(array(
+        ':uid' => $_SESSION['user_id'],
+        ':fn' => $_POST['first_name'],
+        ':ln' => $_POST['last_name'],
+        ':em' => $_POST['email'],
+        ':he' => $_POST['headline'],
+        ':su' => $_POST['summary'],
+        ':pid' => $_POST['profile_id'])
+        );
+      $profile_id = $pdo->lastInsertId();
+
+      // Clear out the old position entries
+      $stmt = $pdo->prepare('DELETE FROM Position WHERE profile_id=:pid');
+      $stmt->execute(array( ':pid' => $_REQUEST['profile_id']));
+
+      $rank = 1;
+      for($i=1; $i<=9; $i++) {
+        if ( ! isset($_POST['year'.$i]) ) continue;
+        if ( ! isset($_POST['desc'.$i]) ) continue;
+        $stmt = $pdo->prepare('INSERT INTO Position (profile_id, rank, year, description)
+                                VALUES ( :pid, :rank, :year, :desc)');
+        $stmt->execute(array(
+          ':pid' => $_REQUEST['profile_id'],
+          ':rank' => $rank,
+          ':year' => $_POST['year'.$i],
+          ':desc' => $_POST['desc'.$i])
+        );
+        $rank++;
+      };
+
+      $_SESSION['success'] = "Record edited";
+      header("Location: index.php");
+      return;
+    }
+}
+$stmt = $pdo->prepare("SELECT * FROM Profile where profile_id = :pid");
+$stmt->execute(array(":pid" => $_GET['profile_id']));
+$row = $stmt->fetch(PDO::FETCH_ASSOC);
+if ( $row === false ) {
+    $_SESSION['error'] = 'Bad value for profile_id';
+    header( 'Location: index.php' ) ;
+    return;
+}
+$stmt = $pdo->prepare("SELECT * FROM Position where profile_id = :pid ORDER BY rank ASC");
+$stmt->execute(array(":pid" => $_GET['profile_id']));
+$row_pos = $stmt->fetchall(PDO::FETCH_ASSOC);
+if ( $row_pos === false ) {
+    $_SESSION['error'] = 'Bad value for profile_id';
+    header( 'Location: index.php' ) ;
+    return;
+}
+?>
+<!DOCTYPE html>
+<html>
+<head>
+<?php require_once "bootstrap.php"; ?>
+<title>Tadashi Makio Profile Edit</title>
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7" crossorigin="anonymous">
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap-theme.min.css" integrity="sha384-fLW2N01lMqjakBkx3l/M9EahuwpSfeNvV63J5ezn3uZzapT0u7EYsXMjQV+0En5r" crossorigin="anonymous">
+<script src="https://code.jquery.com/jquery-3.2.1.js" integrity="sha256-DZAnKJ/6XZ9si04Hgrsxu/8s717jcIzLy3oi35EouyE=" crossorigin="anonymous"></script>
+</head>
+<body>
+<div class="container">
+<h1>Editing Profile for <?= htmlentities($_SESSION["name"]) ?></h1>
+<?php
+if ( isset($_SESSION["error"]) ) {
+    echo('<p style="color: red;">'.htmlentities($_SESSION["error"])."</p>\n");
+    unset($_SESSION["error"]);
+}
+if ( isset($_SESSION['success']) ) {
+  echo('<p style="color: green;">'.htmlentities($_SESSION['success'])."</p>\n");
+  unset($_SESSION['success']);
+}
+?>
+<form method="post">
+<p>First Name:
+<input type="text" name="first_name" size="40" value="<?= htmlentities($row['first_name']) ?>"></p>
+<p>Last Name:
+<input type="text" name="last_name" size="40" value="<?= htmlentities($row['last_name']) ?>"></p>
+<p>Email:
+<input type="text" name="email" size="40" value="<?= htmlentities($row['email']) ?>"></p>
+<p>Headline:</p>
+<input type="text" name="headline" size="80" value="<?= htmlentities($row['headline']) ?>">
+<p>Summary:</p>
+<textarea name="summary" rows="8" cols="80">
+<?= htmlentities($row['summary']) ?>
+</textarea>
+<p>Position: <input type="submit" id="addPos" value="+">
+<div id="position_fields">
+<?php
+  $i = 1;
+  foreach ( $row_pos as $eachrow ) {
+    echo ('<div id = "position'.$i.'">');
+    echo ('<p>Year: <input type="text" name="year'.$i.'" value="'.htmlentities($eachrow['year']).'">');
+    echo ('<input type="button" value="-" onclick="$(\'#position'.$i.'\').remove();return false;"></p>');
+    echo ('<textarea name="desc'.$i.'" rows="8" cols="80">'.htmlentities($eachrow['description']).'</textarea></div>');
+    $i = $i + 1;
+  }
+?>
+</div>
+<input type="hidden" name="profile_id" value="<?= $row['profile_id'] ?>">
+<p><input type="submit" value="Save">
+<input type="submit" name="cancel" value="Cancel"></p>
+</form>
+<script type="text/javascript">
+countPos = <?= $i ?>;
+$(document).ready(function(){
+  $('#addPos').click(function(){
+    event.preventDefault();
+    if (countPos >= 9) {
+      alert("Maximum of nine position entries exceeded");
+      return;
+    }
+    countPos = countPos + 1;
+    $('#position_fields').append('<div id = "position' + countPos + '">' +
+    '<p>Year: <input type="text" name="year' + countPos + '">' +
+    '<input type="button" value="-" onclick="$(\'#position' + countPos + '\').remove();return false;"></p>' +
+    '<textarea name="desc' + countPos +'" rows="8" cols="80"></textarea>' +
+    '</div>');
+    });
+  });
+</script>
+</div>
+</body>
+</html>
